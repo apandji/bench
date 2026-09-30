@@ -1,0 +1,209 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #1c281c;
+  --ink-soft: #4d5c4d;
+  --paper: #f2efe4;
+  --line: #c8d0bc;
+  --canopy: #3f6b45;
+  --canopy-deep: #2f5236;
+  --sky-top: #8ec6d8;
+  --sky-mid: #c7ddc8;
+  --grass-top: #7fad6d;
+  --grass-bottom: #4f7d4a;
+  --background: var(--paper);
+  --foreground: var(--ink);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.park-sky {
+  background:
+    radial-gradient(ellipse 90% 55% at 50% -10%, #d8eef5 0%, transparent 60%),
+    linear-gradient(
+      180deg,
+      var(--sky-top) 0%,
+      var(--sky-mid) 48%,
+      #d7e4b8 72%,
+      var(--grass-top) 100%
+    );
+}
+
+.park-haze {
+  background: radial-gradient(
+    ellipse 70% 50% at 50% 20%,
+    rgba(255, 255, 255, 0.35),
+    transparent 70%
+  );
+  animation: haze-drift 12s ease-in-out infinite alternate;
+}
+
+.park-grass {
+  background:
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      color-mix(in oklab, var(--grass-top) 55%, transparent) 12%,
+      var(--grass-bottom) 100%
+    ),
+    repeating-linear-gradient(
+      -18deg,
+      transparent 0 10px,
+      rgba(255, 255, 255, 0.04) 10px 11px
+    );
+}
+
+.park-grass-grain {
+  background-image: radial-gradient(
+    rgba(28, 40, 28, 0.08) 0.6px,
+    transparent 0.7px
+  );
+  background-size: 7px 7px;
+}
+
+.tree-sway {
+  transform-origin: 50% 100%;
+  animation: sway 7s ease-in-out infinite;
+}
+
+.tree-sway-slow {
+  transform-origin: 50% 100%;
+  animation: sway 10s ease-in-out infinite reverse;
+}
+
+.leaf {
+  position: absolute;
+  width: 10px;
+  height: 14px;
+  border-radius: 60% 10% 60% 10%;
+  background: #5f8a4a;
+  opacity: 0.55;
+  animation: leaf-fall 14s linear infinite;
+}
+
+.leaf-a {
+  left: 18%;
+  top: -5%;
+  animation-delay: 0s;
+}
+
+.leaf-b {
+  left: 62%;
+  top: -8%;
+  background: #8a6a3a;
+  animation-delay: -5s;
+  animation-duration: 18s;
+}
+
+.leaf-c {
+  left: 78%;
+  top: -4%;
+  background: #3f6b45;
+  animation-delay: -9s;
+  animation-duration: 16s;
+}
+
+.speech-bubble {
+  background: color-mix(in oklab, var(--paper) 92%, white);
+  border: 1px solid color-mix(in oklab, var(--ink) 12%, transparent);
+  box-shadow: 0 10px 28px rgba(28, 40, 28, 0.14);
+  animation: bubble-in 180ms ease-out;
+}
+
+.speech-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 10px;
+  height: 10px;
+  transform: translateX(-50%) rotate(45deg);
+  background: inherit;
+  border-right: 1px solid color-mix(in oklab, var(--ink) 12%, transparent);
+  border-bottom: 1px solid color-mix(in oklab, var(--ink) 12%, transparent);
+}
+
+.typing-caret {
+  display: inline-block;
+  margin-left: 1px;
+  animation: caret-blink 1s steps(1) infinite;
+  color: color-mix(in oklab, var(--ink) 55%, transparent);
+}
+
+@keyframes sway {
+  0%,
+  100% {
+    transform: rotate(-1.5deg);
+  }
+  50% {
+    transform: rotate(1.8deg);
+  }
+}
+
+@keyframes haze-drift {
+  from {
+    transform: translateX(-1.5%);
+    opacity: 0.7;
+  }
+  to {
+    transform: translateX(1.5%);
+    opacity: 1;
+  }
+}
+
+@keyframes leaf-fall {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate3d(-40px, 110vh, 0) rotate(240deg);
+    opacity: 0;
+  }
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@keyframes caret-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-sway,
+  .tree-sway-slow,
+  .park-haze,
+  .leaf,
+  .typing-caret,
+  .speech-bubble {
+    animation: none !important;
+    transition: none !important;
+  }
+}
