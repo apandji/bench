@@ -13,7 +13,8 @@ app/
 │   ├── main.py                API router assembly
 │   ├── deps.py                Shared dependencies
 │   └── routes/
-│       ├── collaboration.py   WebSocket, presence store, Redis pub/sub
+│       ├── collaboration.py   WebSocket, presence store, Redis pub/sub, combat
+│       ├── ideas.py           Idea box endpoints and markdown feed
 │       └── items.py           Sample REST endpoints under /api/v1
 └── core/
     └── config.py              Application settings
@@ -67,16 +68,25 @@ The server accepts these client messages:
 | Message | Description |
 | --- | --- |
 | `hello` | Updates the participant name and color |
-| `cursor` | Updates normalized `x` and `y` cursor coordinates |
+| `cursor` | Updates normalized `x` and `y` cursor coordinates (ignored while seated) |
+| `typing` | Updates the live draft text |
+| `sit` / `stand` | Claims or leaves a bench seat |
+| `attack` | Hits a nearby standing player (`target` id) |
 
 The server sends these messages:
 
 | Message | Description |
 | --- | --- |
 | `snapshot` | Initial participant list and the active state store |
-| `presence` | Participant joined or changed profile data |
-| `cursor` | Participant cursor moved |
+| `presence` | Participant joined or changed state (profile, seat, ghost/respawn) |
+| `cursor` / `typing` | Participant cursor moved or draft changed |
+| `sit_denied` | The bench is full |
+| `hit` | Damage dealt, updated HP, knockout flag |
+| `idea` | A visitor submitted an idea |
 | `leave` | Participant disconnected |
+
+Combat rules (range, cooldown, damage, ghost/respawn) are enforced here, not
+in the browser. See the root `AGENTS.md` for the full protocol.
 
 Input is intentionally small and defensive: text fields are trimmed and capped, colors must be `#RRGGBB`, and coordinates are clamped from `0` to `1`.
 
@@ -89,6 +99,9 @@ When the backend runs by itself:
 | `GET` | `/` | Backend landing page |
 | `WS` | `/ws` | Collaboration WebSocket endpoint |
 | `GET` | `/api/presence` | Current presence snapshot and active state store |
+| `POST` | `/api/ideas` | Submit an idea (`{text, author}`, 5/min per IP) |
+| `GET` | `/api/ideas` | All ideas as JSON |
+| `GET` | `/api/ideas.md` | All ideas as markdown |
 | `GET` | `/api/v1/items/` | List sample items |
 | `GET` | `/api/v1/items/{item_id}` | Get item by ID |
 | `GET` | `/docs` | Interactive API docs |

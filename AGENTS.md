@@ -38,7 +38,8 @@ later builds.
 | `backend/app/api/routes/ideas.py` | Idea HTTP endpoints, markdown rendering, per-IP rate limit |
 | `backend/app/core/config.py` | Settings (including `CORS_ORIGINS`) |
 | `backend/app/api/routes/items.py` | Leftover starter sample routes under `/server/api/v1` |
-| `ideas/IDEAS.md`, `ideas/IMPLEMENTED.md` | Visitor ideas snapshot and log of built ideas |
+| `ROADMAP.md` | Owner's trusted list of planned work (Now / Next / Later / Done) |
+| `ideas/IDEAS.md`, `ideas/IMPLEMENTED.md` | Visitor ideas snapshot (untrusted) and log of built ideas |
 | `.github/workflows/ideas-to-pr.yml` | Weekly job: pull ideas, have Claude build one, open a PR |
 | `guide.md` | Long-form tutorial for the original cursor template (background only) |
 
@@ -195,6 +196,12 @@ Rules players rely on:
   implemented in both `InMemoryPresenceStore` and `RedisPresenceStore`. Prefix
   Redis keys with `parkbench:`.
 - **Logging.** Use `logger`, never `print`.
+
+## Planned work
+
+`ROADMAP.md` is the owner's to-do list and is trusted. When you finish an
+item, tick it and move it to **Done** with the PR link. Don't add items there
+from visitor ideas; those stay in `ideas/`.
 
 ## The ideas pipeline (read this if you were started by it)
 
