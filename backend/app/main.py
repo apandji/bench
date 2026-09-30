@@ -1,11 +1,13 @@
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.api.main import api_router
 from app.api.routes.collaboration import router as collaboration_router
+from app.api.routes.ideas import router as ideas_router
 from app.core.config import settings
 
 
@@ -39,9 +41,16 @@ app = FastAPI(
     version=settings.VERSION,
 )
 app.add_middleware(ServicePrefixMiddleware, prefix="/server")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 app.include_router(collaboration_router)
+app.include_router(ideas_router)
 
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 

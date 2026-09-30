@@ -177,11 +177,11 @@ body {
 @keyframes bubble-in {
   from {
     opacity: 0;
-    transform: translate(-50%, 6px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: translateY(0);
   }
 }
 
@@ -205,5 +205,101 @@ body {
   .speech-bubble {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+.hp-card {
+  background: #fbf8ec;
+  border: 2px solid #2b2d2a;
+  border-radius: 6px 6px 6px 14px;
+  box-shadow:
+    inset 0 0 0 2px #fbf8ec,
+    inset 0 0 0 3px color-mix(in oklab, #2b2d2a 25%, transparent),
+    0 8px 18px rgba(28, 40, 28, 0.18);
+  font-family: var(--font-body);
+  animation: bubble-in 160ms ease-out;
+}
+
+.damage-pop {
+  pointer-events: none;
+  text-shadow:
+    0 1px 0 white,
+    0 0 6px white;
+  animation: damage-pop 900ms ease-out forwards;
+}
+
+.hit-shake {
+  animation: hit-shake 260ms ease-in-out;
+}
+
+.cursor-punch {
+  animation: cursor-punch 180ms ease-out;
+  transform-origin: 0 0;
+}
+
+.ghost-float {
+  animation: ghost-float 1.6s ease-in-out infinite;
+}
+
+@keyframes damage-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.7);
+  }
+  20% {
+    opacity: 1;
+    transform: translateY(-6px) scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-28px) scale(1);
+  }
+}
+
+@keyframes hit-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+}
+
+@keyframes cursor-punch {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.35) rotate(-12deg);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes ghost-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .damage-pop,
+  .hit-shake,
+  .cursor-punch,
+  .ghost-float {
+    animation-duration: 1ms;
+    animation-iteration-count: 1;
   }
 }

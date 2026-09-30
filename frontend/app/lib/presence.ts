@@ -1,5 +1,43 @@
-import type { PresenceUser, SocketMessage } from "./types";
-import { colors, names, sessionUserKey } from "./types";
+import type { BoardSize, PresenceUser, SocketMessage } from "./types";
+import {
+  benchSeatX,
+  benchSeatY,
+  colors,
+  names,
+  sessionUserKey,
+} from "./types";
+
+export type BenchRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+/** Where a user is drawn, in board pixels. Seated users sit on the bench. */
+export function getUserPoint(
+  user: PresenceUser,
+  boardSize: BoardSize,
+  bench: BenchRect | null,
+): [number, number] {
+  if (user.seated && typeof user.seat === "number" && bench) {
+    const seatX = benchSeatX[user.seat] ?? 0.5;
+    return [
+      bench.left + bench.width * seatX,
+      bench.top + bench.height * benchSeatY,
+    ];
+  }
+
+  return [user.x * boardSize.width, user.y * boardSize.height];
+}
+
+function serverBaseUrl() {
+  return (process.env.NEXT_PUBLIC_WS_URL ?? "/server").replace(/\/$/, "");
+}
+
+export function createApiUrl(path: string) {
+  return new URL(`${serverBaseUrl()}${path}`, window.location.origin).toString();
+}
 
 export function getCursorTransform(point: number[]) {
   return `translate3d(${point[0]}px, ${point[1]}px, 0) translate(-1px, -2px)`;
@@ -59,11 +97,7 @@ export function defaultUser(): PresenceUser {
 export function createWebSocketUrl(
   user: Pick<PresenceUser, "id" | "name" | "color">,
 ) {
-  const baseUrl = process.env.NEXT_PUBLIC_WS_URL ?? "/server";
-  const url = new URL(
-    `${baseUrl.replace(/\/$/, "")}/ws`,
-    window.location.origin,
-  );
+  const url = new URL(`${serverBaseUrl()}/ws`, window.location.origin);
 
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("id", user.id);
@@ -97,6 +131,17 @@ export function reducePresence(
     message.type === "typing"
   ) {
     return { ...currentUsers, [message.user.id]: message.user };
+  }
+
+  if (message.type === "hit") {
+    return {
+      ...currentUsers,
+      [message.attacker.id]: {
+        ...currentUsers[message.attacker.id],
+        ...message.attacker,
+      },
+      [message.target.id]: message.target,
+    };
   }
 
   if (message.type === "leave" && message.id !== selfId) {

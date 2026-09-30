@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
+import random
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -20,12 +22,22 @@ logger = logging.getLogger(__name__)
 PRESENCE_HASH_KEY = "parkbench:presence:users"
 PRESENCE_ACTIVITY_KEY = "parkbench:presence:activity"
 PRESENCE_CHANNEL = "parkbench:presence:events"
+IDEAS_KEY = "parkbench:ideas"
+MAX_IDEAS = 500
 STALE_AFTER_SECONDS = 120
 INSTANCE_ID = uuid.uuid4().hex
 CURSOR_SNAPSHOT_INTERVAL_SECONDS = 0.75
 MAX_SEATS = 5
-BENCH_SEAT_X = (0.22, 0.36, 0.50, 0.64, 0.78)
-BENCH_SEAT_Y = 0.62
+
+MAX_HP = 100
+HIT_DAMAGE_RANGE = (8, 16)
+HIT_RANGE = 0.07
+HIT_COOLDOWN_SECONDS = 0.35
+BATTLE_SECONDS = 8
+GHOST_SECONDS = 5
+
+# Server-only fields that never leave this process.
+PRIVATE_FIELDS = ("battle_until", "last_attack_at")
 
 
 @dataclass
@@ -39,6 +51,10 @@ class Participant:
     typing: str = ""
     seated: bool = False
     seat: int | None = None
+    hp: int = MAX_HP
+    ghost: bool = False
+    battle_until: float = 0
+    last_attack_at: float = 0
 
 
 class PresenceStore(Protocol):
@@ -59,12 +75,19 @@ class PresenceStore(Protocol):
     async def start_listener(self, on_event: Any) -> None:
         ...
 
+    async def add_idea(self, idea: dict[str, Any]) -> None:
+        ...
+
+    async def list_ideas(self) -> list[dict[str, Any]]:
+        ...
+
 
 class InMemoryPresenceStore:
     label = "memory"
 
     def __init__(self) -> None:
         self.participants: dict[str, Participant] = {}
+        self.ideas: list[dict[str, Any]] = []
         self.lock = asyncio.Lock()
 
     async def snapshot(self) -> list[dict[str, Any]]:
@@ -85,6 +108,15 @@ class InMemoryPresenceStore:
 
     async def start_listener(self, on_event: Any) -> None:
         return None
+
+    async def add_idea(self, idea: dict[str, Any]) -> None:
+        async with self.lock:
+            self.ideas.append(idea)
+            del self.ideas[:-MAX_IDEAS]
+
+    async def list_ideas(self) -> list[dict[str, Any]]:
+        async with self.lock:
+            return list(self.ideas)
 
     def prune_stale(self) -> None:
         cutoff = time.time() - STALE_AFTER_SECONDS
@@ -172,6 +204,15 @@ class RedisPresenceStore:
                 logger.exception("Redis pub/sub listener failed; reconnecting")
                 await asyncio.sleep(1)
 
+    async def add_idea(self, idea: dict[str, Any]) -> None:
+        pipe = self.redis.pipeline()
+        pipe.rpush(IDEAS_KEY, json.dumps(idea))
+        pipe.ltrim(IDEAS_KEY, -MAX_IDEAS, -1)
+        await pipe.execute()
+
+    async def list_ideas(self) -> list[dict[str, Any]]:
+        return [json.loads(idea) for idea in await self.redis.lrange(IDEAS_KEY, 0, -1)]
+
     async def prune_stale(self) -> None:
         cutoff = time.time() - STALE_AFTER_SECONDS
         stale_ids = await self.redis.zrangebyscore(PRESENCE_ACTIVITY_KEY, "-inf", cutoff)
@@ -195,9 +236,12 @@ class RedisPresenceStore:
 
 
 clients: dict[str, WebSocket] = {}
+# Participants whose socket lives on this instance; combat is resolved here.
+local_participants: dict[str, Participant] = {}
 clients_lock = asyncio.Lock()
 cursor_snapshot_tasks: dict[str, asyncio.Task[None]] = {}
 cursor_snapshot_lock = asyncio.Lock()
+background_tasks: set[asyncio.Task[Any]] = set()
 store: PresenceStore | None = None
 store_lock = asyncio.Lock()
 
@@ -222,6 +266,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     async with clients_lock:
         clients[participant.id] = websocket
+        local_participants[participant.id] = participant
 
     await presence_store.upsert(participant)
 
@@ -295,8 +340,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 participant.seated = True
                 participant.seat = seat
-                participant.x = BENCH_SEAT_X[seat]
-                participant.y = BENCH_SEAT_Y
                 participant.updated_at = time.time()
                 await presence_store.upsert(participant)
                 await announce({"type": "presence", "user": serialize_user(participant)})
@@ -308,11 +351,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 participant.updated_at = time.time()
                 await presence_store.upsert(participant)
                 await announce({"type": "presence", "user": serialize_user(participant)})
+
+            elif message_type == "attack":
+                await start_attack(presence_store, participant, message.get("target"))
     except WebSocketDisconnect:
         pass
     finally:
         async with clients_lock:
             clients.pop(participant.id, None)
+            if local_participants.get(participant.id) is participant:
+                local_participants.pop(participant.id, None)
 
         await cancel_cursor_snapshot(participant.id)
         await presence_store.remove(participant.id)
@@ -361,7 +409,106 @@ async def announce_realtime(
 
 
 async def handle_remote_event(payload: dict[str, Any]) -> None:
+    if payload.get("type") == "attack_request":
+        await resolve_attack(payload)
+        return
+
     await broadcast(payload)
+
+
+async def start_attack(
+    presence_store: PresenceStore, attacker: Participant, target_id: Any
+) -> None:
+    now = time.time()
+    if (
+        not isinstance(target_id, str)
+        or target_id == attacker.id
+        or attacker.ghost
+        or attacker.seated
+        or now - attacker.last_attack_at < HIT_COOLDOWN_SECONDS
+    ):
+        return
+
+    attacker.last_attack_at = now
+    if now > attacker.battle_until:
+        attacker.hp = MAX_HP
+
+    request = {
+        "type": "attack_request",
+        "attacker": serialize_user(attacker),
+        "targetId": target_id,
+        "damage": random.randint(*HIT_DAMAGE_RANGE),
+    }
+
+    if target_id in local_participants:
+        await resolve_attack(request)
+    else:
+        # The target's socket may live on another instance; let it decide.
+        await presence_store.publish(request)
+
+
+async def resolve_attack(request: dict[str, Any]) -> None:
+    target = local_participants.get(request.get("targetId"))
+    attacker = request.get("attacker")
+    damage = request.get("damage")
+    if (
+        target is None
+        or not isinstance(attacker, dict)
+        or not isinstance(damage, int)
+        or target.id == attacker.get("id")
+        or target.seated
+        or target.ghost
+    ):
+        return
+
+    distance = math.hypot(
+        target.x - clamp_float(attacker.get("x"), fallback=-1),
+        target.y - clamp_float(attacker.get("y"), fallback=-1),
+    )
+    if distance > HIT_RANGE:
+        return
+
+    now = time.time()
+    if now > target.battle_until:
+        target.hp = MAX_HP
+    target.battle_until = now + BATTLE_SECONDS
+    target.hp = max(target.hp - damage, 0)
+    knocked_out = target.hp == 0
+    if knocked_out:
+        target.ghost = True
+        target.typing = ""
+    target.updated_at = now
+
+    local_attacker = local_participants.get(attacker.get("id"))
+    if local_attacker is not None:
+        local_attacker.battle_until = now + BATTLE_SECONDS
+
+    await (await get_store()).upsert(target)
+    await announce(
+        {
+            "type": "hit",
+            "attacker": attacker,
+            "target": serialize_user(target),
+            "damage": damage,
+            "ko": knocked_out,
+        }
+    )
+
+    if knocked_out:
+        schedule_background(respawn(target), "respawn knocked out participant")
+
+
+async def respawn(participant: Participant) -> None:
+    await asyncio.sleep(GHOST_SECONDS)
+    if local_participants.get(participant.id) is not participant:
+        return
+
+    participant.ghost = False
+    participant.hp = MAX_HP
+    participant.battle_until = 0
+    participant.updated_at = time.time()
+    await (await get_store()).upsert(participant)
+    await announce({"type": "presence", "user": serialize_user(participant)})
 
 
 async def broadcast(payload: dict[str, Any], skip_id: str | None = None) -> None:
@@ -425,8 +572,11 @@ async def cancel_cursor_snapshot(participant_id: str) -> None:
 
 def schedule_background(coro: Any, description: str) -> asyncio.Task[None]:
     task = asyncio.create_task(coro)
+    # The event loop only keeps weak references to tasks.
+    background_tasks.add(task)
 
     def log_error(completed_task: asyncio.Task[None]) -> None:
+        background_tasks.discard(completed_task)
         if completed_task.cancelled():
             return
 
@@ -471,6 +621,8 @@ def parse_message(raw_message: Any) -> dict[str, Any] | None:
 def serialize_user(participant: Participant) -> dict[str, Any]:
     payload = asdict(participant)
     payload["updatedAt"] = payload.pop("updated_at")
+    for field in PRIVATE_FIELDS:
+        payload.pop(field, None)
     return payload
 
 
