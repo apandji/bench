@@ -1,14 +1,19 @@
 "use client";
 
+import type { Ref } from "react";
+
 export function Bench({
   onSit,
   isSeated,
+  ref,
 }: {
   onSit: () => void;
   isSeated: boolean;
+  ref?: Ref<HTMLButtonElement>;
 }) {
   return (
     <button
+      ref={ref}
       type="button"
       onClick={onSit}
       className="absolute left-1/2 top-[54%] z-20 w-[min(72vw,560px)] -translate-x-1/2 -translate-y-1/2 cursor-pointer border-0 bg-transparent p-0 outline-none focus-visible:ring-2 focus-visible:ring-[var(--ink)]/40"

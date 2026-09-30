@@ -25,6 +25,15 @@ Realtime park with multiplayer cursors and a shared conversation bench.
 
 Beyond cursor presence: `typing`, `sit`, `stand`, and `sit_denied`.
 
+- Seating: the server only assigns a `seat` index; the frontend places seated
+  users on the bench artwork (`getUserPoint` in `frontend/app/lib/presence.ts`).
+- Battles: client sends `attack` with a `target` id; the server checks range,
+  cooldown and safe states (seated/ghost), then broadcasts `hit`. At 0 HP the
+  target becomes a `ghost` and respawns after a few seconds via `presence`.
+  Battle music is an original Web Audio loop (`frontend/app/lib/battle-music.ts`).
+- Ideas: `POST /server/api/ideas`, `GET /server/api/ideas.md`, broadcast as
+  `idea`. `.github/workflows/ideas-to-pr.yml` turns them into PRs.
+
 ## Local run
 
 ```bash

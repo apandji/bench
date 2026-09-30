@@ -9,15 +9,21 @@ import {
   useState,
 } from "react";
 import { ParkShell } from "./components/park-shell";
+import { BattleMusic } from "./lib/battle-music";
 import {
+  battleDurationMs,
   cursorSendIntervalMs,
+  musicMutedKey,
   sessionUserKey,
   typingSendIntervalMs,
   type BoardSize,
+  type CombatState,
+  type Idea,
   type PresenceUser,
 } from "./lib/types";
 import {
   clamp,
+  createApiUrl,
   createLocalUser,
   createWebSocketUrl,
   defaultUser,
@@ -47,6 +53,14 @@ export function ParkBench() {
   const [self, setSelf] = useState<PresenceUser>(defaultUser);
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [combat, setCombat] = useState<Record<string, CombatState>>({});
+  const [isPunching, setIsPunching] = useState(false);
+  const punchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [isIdeaBoxOpen, setIsIdeaBoxOpen] = useState(false);
+  const musicRef = useRef<BattleMusic | null>(null);
+  const [isMusicMuted, setIsMusicMuted] = useState(false);
+  const isFightActive = Object.keys(combat).length > 0;
   const selfRef = useRef(self);
   const draftRef = useRef(draft);
   const selfId = self.id;
@@ -118,6 +132,98 @@ export function ParkBench() {
     };
   }, [isReady]);
 
+  // Drop battle state once a fight has gone quiet so health bars disappear.
+  useEffect(() => {
+    const deadlines = Object.values(combat).map((entry) => entry.until);
+    if (!deadlines.length) {
+      return;
+    }
+
+    const timer = window.setTimeout(
+      () => {
+        const now = Date.now();
+        setCombat((current) =>
+          Object.fromEntries(
+            Object.entries(current).filter(([, entry]) => entry.until > now),
+          ),
+        );
+      },
+      Math.max(Math.min(...deadlines) - Date.now(), 0) + 50,
+    );
+
+    return () => window.clearTimeout(timer);
+  }, [combat]);
+
+  useEffect(() => {
+    const music = new BattleMusic();
+    musicRef.current = music;
+
+    // Browsers only allow audio after a user gesture.
+    const unlock = () => music.unlock();
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+      music.dispose();
+      musicRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        setIsMusicMuted(localStorage.getItem(musicMutedKey) === "1");
+      } catch {
+        // Storage can be unavailable; default to music on.
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const music = musicRef.current;
+    if (!music) {
+      return;
+    }
+
+    if (isFightActive && !isMusicMuted) {
+      music.start();
+    } else {
+      music.stop();
+    }
+  }, [isFightActive, isMusicMuted]);
+
+  const toggleMusic = useCallback(() => {
+    setIsMusicMuted((muted) => {
+      try {
+        localStorage.setItem(musicMutedKey, muted ? "0" : "1");
+      } catch {
+        // Ignore; the toggle still works for this visit.
+      }
+      return !muted;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isReady) {
+      return;
+    }
+
+    const controller = new AbortController();
+    fetch(createApiUrl("/api/ideas"), { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { ideas?: Idea[] } | null) => {
+        if (data?.ideas) {
+          setIdeas(data.ideas);
+        }
+      })
+      .catch(() => {});
+
+    return () => controller.abort();
+  }, [isReady]);
+
   useEffect(() => {
     if (!isReady) {
       return;
@@ -171,6 +277,43 @@ export function ParkBench() {
           setNotice(message.reason);
           window.setTimeout(() => setNotice(null), 2800);
           return;
+        }
+
+        if (message.type === "idea") {
+          setIdeas((current) => [...current, message.idea].slice(-500));
+          return;
+        }
+
+        if (message.type === "hit") {
+          const until = Date.now() + battleDurationMs;
+          const { attacker, target } = message;
+          setCombat((current) => ({
+            ...current,
+            [attacker.id]: { ...current[attacker.id], until },
+            [target.id]: {
+              until,
+              lastHit: {
+                damage: message.damage,
+                ko: message.ko,
+                key: Date.now(),
+              },
+            },
+          }));
+
+          if (attacker.id === selfId) {
+            setSelf((current) => ({ ...current, hp: attacker.hp }));
+          }
+          if (target.id === selfId) {
+            setSelf((current) => ({
+              ...current,
+              hp: target.hp,
+              ghost: target.ghost,
+              typing: target.typing,
+            }));
+            if (target.ghost) {
+              setDraft("");
+            }
+          }
         }
 
         setUsers((currentUsers) =>
@@ -400,6 +543,8 @@ export function ParkBench() {
         event.preventDefault();
         if (!selfRef.current.seated) {
           sitOnBench();
+        } else if (draftRef.current) {
+          updateDraft("");
         }
         return;
       }
@@ -423,6 +568,51 @@ export function ParkBench() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [sitOnBench, standUp, updateDraft]);
 
+  const attack = useCallback((targetId: string, x: number, y: number) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    // Make sure the server judges range from where the click happened.
+    if (cursorSendTimerRef.current) {
+      clearTimeout(cursorSendTimerRef.current);
+      cursorSendTimerRef.current = null;
+    }
+    pendingCursorRef.current = null;
+    lastSentAtRef.current = Date.now();
+    socket.send(JSON.stringify({ type: "cursor", x, y }));
+    socket.send(JSON.stringify({ type: "attack", target: targetId }));
+
+    setIsPunching(true);
+    if (punchTimerRef.current) {
+      clearTimeout(punchTimerRef.current);
+    }
+    punchTimerRef.current = setTimeout(() => setIsPunching(false), 180);
+  }, []);
+
+  const submitIdea = useCallback(async (text: string) => {
+    try {
+      const response = await fetch(createApiUrl("/api/ideas"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, author: selfRef.current.name }),
+      });
+      if (response.ok) {
+        return null;
+      }
+
+      const data = (await response.json().catch(() => null)) as {
+        detail?: unknown;
+      } | null;
+      return typeof data?.detail === "string"
+        ? data.detail
+        : "Couldn't save that idea. Try again?";
+    } catch {
+      return "Couldn't reach the park. Try again?";
+    }
+  }, []);
+
   const updateName = (name: string) => {
     setSelf((currentSelf) => ({
       ...currentSelf,
@@ -438,16 +628,26 @@ export function ParkBench() {
     <ParkShell
       boardRef={boardRef}
       boardSize={boardSize}
+      combat={combat}
       connectionState={connectionState}
       draft={draft}
+      ideas={ideas}
+      isFightActive={isFightActive}
+      isIdeaBoxOpen={isIdeaBoxOpen}
+      isMusicMuted={isMusicMuted}
+      isPunching={isPunching}
       isSeated={isSeated}
       notice={notice}
       otherUsers={otherUsers}
       seatedCount={seatedCount}
       self={self}
+      onAttack={attack}
       onPointerMove={sendCursor}
       onSit={sitOnBench}
       onStand={standUp}
+      onSubmitIdea={submitIdea}
+      onToggleIdeaBox={() => setIsIdeaBoxOpen((open) => !open)}
+      onToggleMusic={toggleMusic}
       onUpdateName={updateName}
       onUpdateColor={updateColor}
     />
