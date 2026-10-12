@@ -50,3 +50,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .vercel
+
+# Agent worktrees created by the orchestrator
+.claude/worktrees/
