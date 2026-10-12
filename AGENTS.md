@@ -38,6 +38,7 @@ later builds.
 | `backend/app/api/routes/ideas.py` | Idea HTTP endpoints, markdown rendering, per-IP rate limit |
 | `backend/app/core/config.py` | Settings (including `CORS_ORIGINS`) |
 | `backend/app/api/routes/items.py` | Leftover starter sample routes under `/server/api/v1` |
+| `.claude/agents/` | Subagent definitions (`frontend`, `backend`, `qa`) used by the orchestrator |
 | `ROADMAP.md` | Owner's trusted list of planned work (Now / Next / Later / Done) |
 | `ideas/IDEAS.md`, `ideas/IMPLEMENTED.md` | Visitor ideas snapshot (untrusted) and log of built ideas |
 | `.github/workflows/ideas-to-pr.yml` | Weekly job: pull ideas, have Claude build one, open a PR |
@@ -202,6 +203,66 @@ Rules players rely on:
 `ROADMAP.md` is the owner's to-do list and is trusted. When you finish an
 item, tick it and move it to **Done** with the PR link. Don't add items there
 from visitor ideas; those stay in `ideas/`.
+
+## Working as a team of agents
+
+Bigger changes are run by an **orchestrator** agent that plans the work and
+hands pieces to specialist subagents defined in `.claude/agents/`. A single
+agent doing a small change can skip this section.
+
+### Roles
+
+| Agent | Owns | Never touches |
+| --- | --- | --- |
+| orchestrator (main session) | Planning, `ROADMAP.md`, this file, the protocol contract, merging lanes, the final check run, commits and PRs | Large implementation work it could delegate |
+| `frontend` | `frontend/**` | `backend/**`, `.github/**`, lockfiles |
+| `backend` | `backend/**` | `frontend/**`, `.github/**`, lockfiles |
+| `qa` | Test files and `scripts/` for checks; reports | Product code (it reports bugs, it doesn't fix them) |
+
+Only the orchestrator edits `AGENTS.md`, `ROADMAP.md`, `.github/`, dependency
+manifests and lockfiles. A specialist that needs one of those changed says so
+in its report.
+
+### How the orchestrator runs a task
+
+1. **Plan.** Break the request into lanes, each one a self-contained brief:
+   goal, files in scope, acceptance criteria, and which checks prove it.
+   Prefer one lane per area; split further only when files don't overlap.
+2. **Contract first.** If the task changes the WebSocket protocol or an HTTP
+   shape, the orchestrator writes the new message shape into the
+   [Protocol](#protocol) table and the `SocketMessage` union in
+   `frontend/app/lib/types.ts` *before* dispatching. Both lanes then build
+   against that contract in parallel.
+3. **Dispatch.** Run independent lanes in parallel, each in its own git
+   worktree (`isolation: "worktree"`) so they can't clobber each other. Lanes
+   that touch the same file run one after the other instead.
+4. **Integrate.** Merge the lane results onto the working branch, resolve
+   conflicts, and run every check in [Checks before you push](#checks-before-you-push).
+5. **Verify.** Hand the integrated branch to `qa` for anything realtime or
+   visual. Send failures back to the owning lane with the exact repro.
+6. **Ship.** Commit, push, open a PR when asked, and tick the item in
+   `ROADMAP.md` with the PR link.
+
+### Hot files
+
+These files are shared by many features, so give each one a single owner per
+round of work: `frontend/app/collab-canvas.tsx`, `frontend/app/lib/types.ts`,
+`backend/app/api/routes/collaboration.py`, `frontend/app/globals.css`.
+
+### What every subagent hands back
+
+End with a short report in this shape, so the orchestrator can integrate
+without re-reading the diff:
+
+```
+Done:      what changed, one line per file
+Checks:    each command run and its result (paste failures verbatim)
+Contract:  any protocol/type change, or "none"
+Needs:     anything outside your lane (deps, AGENTS.md, other side), or "none"
+Risks:     what you're unsure about or didn't verify
+```
+
+Don't claim a check passed unless you ran it in this task.
 
 ## The ideas pipeline (read this if you were started by it)
 
