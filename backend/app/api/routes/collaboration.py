@@ -659,4 +659,7 @@ def clamp_float(value: Any, fallback: float) -> float:
     except (TypeError, ValueError):
         return fallback
 
+    if not math.isfinite(number):
+        return fallback
+
     return min(max(number, 0), 1)

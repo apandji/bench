@@ -126,10 +126,6 @@ async def test_bench_is_safe_zone(visitors):
     await attack(a, b)  # control
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="NaN cursor coords make the range check (distance > HIT_RANGE) always false",
-)
 async def test_nan_position_cannot_bypass_range(visitors):
     a = await visitors()
     b = await visitors()

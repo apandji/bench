@@ -57,10 +57,6 @@ async def test_cursor_is_clamped(visitors):
     assert (msg["user"]["x"], msg["user"]["y"]) == (1, 0.25)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="clamp_float lets NaN through; the server then emits invalid JSON (NaN)",
-)
 async def test_cursor_nan_is_rejected(visitors):
     a = await visitors()
     b = await visitors()
