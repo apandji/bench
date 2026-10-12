@@ -39,6 +39,9 @@ later builds.
 | `backend/app/core/config.py` | Settings (including `CORS_ORIGINS`) |
 | `backend/app/api/routes/items.py` | Leftover starter sample routes under `/server/api/v1` |
 | `.claude/agents/` | Subagent definitions (`frontend`, `backend`, `qa`) used by the orchestrator |
+| `backend/tests/` | Protocol tests against a real uvicorn server (pytest) |
+| `frontend/e2e/`, `frontend/playwright.config.ts` | Multi-visitor Playwright tests |
+| `.github/workflows/ci.yml` | Lint, typecheck, build, backend tests and e2e on every PR |
 | `ROADMAP.md` | Owner's trusted list of planned work (Now / Next / Later / Done) |
 | `ideas/IDEAS.md`, `ideas/IMPLEMENTED.md` | Visitor ideas snapshot (untrusted) and log of built ideas |
 | `.github/workflows/ideas-to-pr.yml` | Weekly job: pull ideas, have Claude build one, open a PR |
@@ -65,20 +68,29 @@ localhost:3000.
 
 ## Checks before you push
 
-There is no test suite yet. Run these checks, and for anything touching
-realtime behavior, actually drive the app.
+CI (`.github/workflows/ci.yml`) runs all of these on every PR. Run them
+locally first.
 
 ```bash
 pnpm lint                                   # eslint (next core-web-vitals + TS)
 pnpm --dir frontend exec tsc --noEmit       # typecheck
 pnpm build                                  # when touching config, layout, or imports
 cd backend && uv run python -c "import app.main"   # backend import/syntax check
+cd backend && uv run pytest -q              # protocol tests vs. real uvicorn (~25s; -m "not slow" ~7s)
+pnpm test:e2e                               # Playwright, two visitors (~15s; starts both servers)
 ```
 
-- **Backend protocol changes:** run uvicorn and connect two clients with the
-  `websockets` package, which `uv sync` already installs.
-- **Visual or multiplayer changes:** use Playwright with several browser
-  contexts, one per visitor. Chromium is preinstalled in cloud sessions.
+- **Backend tests** (`backend/tests/`) start uvicorn on a free port and drive
+  it with `websockets` clients via the `visitors` fixture in `conftest.py`.
+  Read game values from the module constants; never hard-code them. A test
+  that exposes a bug is marked `xfail(strict=True)` until it's fixed.
+- **End-to-end tests** (`frontend/e2e/`) use one browser context per
+  visitor. Ports default to 5001/3000; set `E2E_API_PORT`/`E2E_WEB_PORT` if
+  they're taken, since locally Playwright reuses whatever already listens
+  there. The selectors match UI copy, so update `park.spec.ts` when you
+  change button labels or the roster text.
+- **New gameplay or protocol behavior needs a backend test**; new
+  user-visible flows should get an e2e scenario.
 - **Don't use Starlette's `TestClient` for multi-client websocket tests.** It
   runs each connection on its own event loop, so broadcasts and background
   tasks that cross clients hang there but work fine under uvicorn.
